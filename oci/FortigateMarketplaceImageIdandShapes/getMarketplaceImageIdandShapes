@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# Script to get the Marketplace Image ID and its compatible Shapes
+# Usage: ./getMarketplaceImageIdandShape "Listing Name" "Version"
+# Example: ./getMarketplaceImageIdandShape "FortiGate Next-Gen Firewall (BYOL)" "7.6.0"
+
+getMarketplaceImageIdandShape() {
+    local LISTING_NAME="$1"
+    local VERSION="$2"
+
+    if [ -z "$VERSION" ]; then
+        echo "Error: Version argument is missing."
+        return 1
+    fi
+
+    echo "Fetching listing ID for: $LISTING_NAME"
+    LISTING_ID=$(oci compute pic listing list --all \
+        --query "data[?\"display-name\"=='$LISTING_NAME'].\"listing-id\" | [0]" --raw-output)
+
+    if [ -z "$LISTING_ID" ]; then
+        echo "Error: Could not fetch listing ID for $LISTING_NAME"
+        return 1
+    fi
+
+    SVERSION_ARM64=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+        --query "data[?contains(\"listing-resource-version\", '$VERSION') && contains(\"listing-resource-version\", 'ARM64')].\"listing-resource-version\" | [0]" --raw-output)
+
+    SVERSION_X64=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+        --query "data[?contains(\"listing-resource-version\", '$VERSION') && contains(\"listing-resource-version\", 'X64')].\"listing-resource-version\" | [0]" --raw-output)
+
+    if [ -z "$SVERSION_ARM64" ] && [ -z "$SVERSION_X64" ]; then
+        echo "Error: Could not find version for $LISTING_NAME with $VERSION"
+        return 1
+    fi
+
+    if [ -n "$SVERSION_ARM64" ]; then
+        IMAGE_ID_ARM64=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+            --query "data[?\"listing-resource-version\"=='$SVERSION_ARM64'].\"listing-resource-id\" | [0]" --raw-output)
+
+        echo "-----------------------------------------"
+        echo "Listing ID (ARM64): $LISTING_ID"
+        echo "Source ID (ARM64): $IMAGE_ID_ARM64"
+        echo "Listing Resource Version (ARM64): $SVERSION_ARM64"
+
+        echo "Compatible Shapes (ARM64):"
+        oci compute image-shape-compatibility-entry list --image-id "$IMAGE_ID_ARM64" \
+            --query "data[].shape" --raw-output
+        echo "-----------------------------------------"
+    fi
+
+    if [ -n "$SVERSION_X64" ]; then
+        IMAGE_ID_X64=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+            --query "data[?\"listing-resource-version\"=='$SVERSION_X64'].\"listing-resource-id\" | [0]" --raw-output)
+
+        echo "Listing ID (X64): $LISTING_ID"
+        echo "Source ID (X64): $IMAGE_ID_X64"
+        echo "Listing Resource Version (X64): $SVERSION_X64"
+
+        echo "Compatible Shapes (X64):"
+        oci compute image-shape-compatibility-entry list --image-id "$IMAGE_ID_X64" \
+            --query "data[].shape" --raw-output
+        echo "-----------------------------------------"
+    fi
+}
+
+# Execute function
+getMarketplaceImageIdandShape "$1" "$2"
