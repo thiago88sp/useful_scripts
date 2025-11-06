@@ -1,0 +1,91 @@
+#!/bin/bash
+# getFortiWebImage.sh - Script to retrieve FortiWeb image information from OCI Marketplace
+# 
+# Usage: ./getFortiWebImage.sh "Fortinet FortiWeb Web Application Firewall WAF" "7.4.2"
+#
+# This script searches for the correct listing ID and image ID for FortiWeb
+# based on the specified product name and version
+
+LISTING_NAME="$1"
+VERSION="$2"
+
+echo "===================================="
+echo "FortiWeb Image Lookup Script"
+echo "===================================="
+echo "Product: $LISTING_NAME"
+echo "Version: $VERSION"
+echo "===================================="
+
+if [ -z "$LISTING_NAME" ] || [ -z "$VERSION" ]; then
+  echo "Error: Required parameters not provided"
+  echo "Usage: $0 \"Listing Name\" \"Version\""
+  echo ""
+  echo "Examples:"
+  echo "  $0 \"Fortinet FortiWeb Web Application Firewall WAF\" \"7.4.2\""
+  echo "  $0 \"Fortinet FortiWeb Web Application Firewall WAF\" \"7.6.0\""
+  exit 1
+fi
+
+echo "Searching for Listing ID for '$LISTING_NAME'..."
+LISTING_ID=$(oci compute pic listing list --all \
+  --query "data[?\"display-name\"=='$LISTING_NAME'].\"listing-id\"|[0]" \
+  --raw-output)
+
+if [ -z "$LISTING_ID" ] || [ "$LISTING_ID" == "null" ]; then
+  echo "❌ Error: Could not find listing-id for '$LISTING_NAME'"
+  echo ""
+  echo "Listing available Fortinet products:"
+  oci compute pic listing list --all \
+    --query "data[?contains(\"display-name\", 'Fortinet')].{\"Name\": \"display-name\", \"ID\": \"listing-id\"}" \
+    --output table
+  exit 1
+fi
+
+echo "✓ Listing ID found: $LISTING_ID"
+
+echo "Searching for image version '$VERSION'..."
+IMAGE_VERSION=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+  --query "data[?contains(\"listing-resource-version\", '$VERSION')].\"listing-resource-version\"|[0]" \
+  --raw-output)
+
+if [ -z "$IMAGE_VERSION" ] || [ "$IMAGE_VERSION" == "null" ]; then
+  echo "❌ Error: Version '$VERSION' not found for '$LISTING_NAME'"
+  echo ""
+  echo "Available versions:"
+  oci compute pic version list --listing-id "$LISTING_ID" --all \
+    --query "data[].\"listing-resource-version\"" \
+    --output table
+  exit 1
+fi
+
+echo "✓ Image version found: $IMAGE_VERSION"
+
+echo "Searching for Image ID for version '$IMAGE_VERSION'..."
+IMAGE_ID=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+  --query "data[?\"listing-resource-version\"=='$IMAGE_VERSION'].\"listing-resource-id\"|[0]" \
+  --raw-output)
+
+if [ -z "$IMAGE_ID" ] || [ "$IMAGE_ID" == "null" ]; then
+  echo "❌ Error: Could not retrieve Image ID for version '$IMAGE_VERSION'"
+  exit 1
+fi
+
+echo "✓ Image ID found: $IMAGE_ID"
+
+echo ""
+echo "===================================="
+echo "FortiWeb RESULTS:"
+echo "===================================="
+echo "Product         : $LISTING_NAME"
+echo "Listing ID      : $LISTING_ID"
+echo "Image ID        : $IMAGE_ID"
+echo "Image Version   : $IMAGE_VERSION"
+echo "===================================="
+
+echo ""
+echo "📋 For Terraform usage:"
+echo "mp_listing_id               = \"$LISTING_ID\""
+echo "mp_listing_resource_version = \"$IMAGE_VERSION\""
+
+echo ""
+echo "✅ Script completed successfully!"

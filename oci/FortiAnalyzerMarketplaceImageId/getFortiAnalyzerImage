@@ -1,0 +1,137 @@
+#!/bin/bash
+# getFortiAnalyzerImage.sh - Script to retrieve FortiAnalyzer image information from OCI Marketplace
+# 
+# Usage: ./getFortiAnalyzerImage.sh "FortiAnalyzer Centralized Logging/Reporting (BYOL)" "7.2.1"
+#
+# This script searches for the correct listing ID and image ID for FortiAnalyzer
+# based on the specified product name and version
+
+LISTING_NAME="${1:-FortiAnalyzer Centralized Logging/Reporting (BYOL)}"
+VERSION="${2:-7.2.1}"
+
+echo "===================================="
+echo "FortiAnalyzer Image Lookup Script"
+echo "===================================="
+echo "Product: $LISTING_NAME"
+echo "Version: $VERSION"
+echo "===================================="
+
+if [ -z "$LISTING_NAME" ] || [ -z "$VERSION" ]; then
+  echo "Error: Required parameters not provided"
+  echo "Usage: $0 \"Listing Name\" \"Version\""
+  echo ""
+  echo "Examples:"
+  echo "  $0 \"FortiAnalyzer Centralized Logging/Reporting (BYOL)\" \"7.2.1\""
+  echo "  $0 \"FortiAnalyzer Centralized Logging/Reporting (BYOL)\" \"7.4.0\""
+  exit 1
+fi
+
+# Search for listing ID based on product name
+echo "Searching for Listing ID for '$LISTING_NAME'..."
+LISTING_ID=$(oci compute pic listing list --all \
+  --query "data[?\"display-name\"=='$LISTING_NAME'].\"listing-id\"|[0]" \
+  --raw-output)
+
+if [ -z "$LISTING_ID" ] || [ "$LISTING_ID" == "null" ]; then
+  echo "❌ Error: Could not find listing-id for '$LISTING_NAME'"
+  echo ""
+  echo "Listing available Fortinet products:"
+  oci compute pic listing list --all \
+    --query "data[?contains(\"display-name\", 'Fortinet')].{\"Name\": \"display-name\", \"ID\": \"listing-id\"}" \
+    --output table
+  exit 1
+fi
+
+echo "✓ Listing ID found: $LISTING_ID"
+
+# Search for specific image version
+echo "Searching for image version '$VERSION'..."
+IMAGE_VERSION=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+  --query "data[?contains(\"listing-resource-version\", '$VERSION')].\"listing-resource-version\"|[0]" \
+  --raw-output)
+
+if [ -z "$IMAGE_VERSION" ] || [ "$IMAGE_VERSION" == "null" ]; then
+  echo "❌ Error: Version '$VERSION' not found for '$LISTING_NAME'"
+  echo ""
+  echo "Available versions:"
+  oci compute pic version list --listing-id "$LISTING_ID" --all \
+    --query "data[].\"listing-resource-version\"" \
+    --output table
+  exit 1
+fi
+
+echo "✓ Image version found: $IMAGE_VERSION"
+
+# Search for Image ID (Resource ID) of the specific version
+echo "Searching for Image ID for version '$IMAGE_VERSION'..."
+IMAGE_ID=$(oci compute pic version list --listing-id "$LISTING_ID" --all \
+  --query "data[?\"listing-resource-version\"=='$IMAGE_VERSION'].\"listing-resource-id\"|[0]" \
+  --raw-output)
+
+if [ -z "$IMAGE_ID" ] || [ "$IMAGE_ID" == "null" ]; then
+  echo "❌ Error: Could not retrieve Image ID for version '$IMAGE_VERSION'"
+  exit 1
+fi
+
+echo "✓ Image ID found: $IMAGE_ID"
+
+echo ""
+echo "===================================="
+echo "FortiAnalyzer RESULTS:"
+echo "===================================="
+echo "Product         : $LISTING_NAME"
+echo "Listing ID      : $LISTING_ID"
+echo "Image ID        : $IMAGE_ID"
+echo "Image Version   : $IMAGE_VERSION"
+echo "===================================="
+
+echo ""
+echo "📋 For Terraform usage:"
+echo "mp_listing_id               = \"$LISTING_ID\""
+echo "mp_listing_resource_version = \"$IMAGE_VERSION\""
+
+echo ""
+echo "📋 To validate in OCI Console:"
+echo "https://cloud.oracle.com/marketplace/application/$LISTING_ID?region=sa-bogota-1"
+
+# Additional validation - check if image is available in current region
+echo ""
+echo "🔍 Validating availability in current region..."
+CURRENT_REGION=$(echo $PS1 | grep -o '[a-z][a-z]-[a-zA-Z]*-[0-9]' | head -1 || echo "sa-bogota-1")
+echo "Current region: $CURRENT_REGION"
+
+# Get detailed region availability
+echo ""
+echo "🌎 Checking regional availability..."
+REGION_DATA=$(oci compute pic version get --listing-id "$LISTING_ID" --resource-version "$IMAGE_VERSION" --query "data.\"available-regions\"" --raw-output 2>/dev/null)
+
+if [ -n "$REGION_DATA" ] && [ "$REGION_DATA" != "null" ]; then
+  echo "Available regions:"
+  echo "$REGION_DATA" | tr ',' '\n' | sed 's/\[//g; s/\]//g; s/"//g; s/^ *//g' | while read -r region; do
+    if [ -n "$region" ]; then
+      if [ "$region" = "sa-bogota-1" ]; then
+        echo "  ✅ $region (Bogotá - Target region)"
+      elif [ "$region" = "$CURRENT_REGION" ]; then
+        echo "  ✅ $region (Current region)"
+      else
+        echo "  📍 $region"
+      fi
+    fi
+  done
+  
+  # Specific check for Bogotá
+  if echo "$REGION_DATA" | grep -q "sa-bogota-1"; then
+    echo ""
+    echo "✅ CONFIRMED: Image is available in sa-bogota-1 (Bogotá)"
+  else
+    echo ""
+    echo "❌ WARNING: Image NOT available in sa-bogota-1 (Bogotá)"
+    echo "💡 Available South American regions:"
+    echo "$REGION_DATA" | tr ',' '\n' | sed 's/\[//g; s/\]//g; s/"//g; s/^ *//g' | grep "sa-" | sed 's/^/   - /'
+  fi
+else
+  echo "⚠️  Could not retrieve region availability data"
+fi
+
+echo ""
+echo "✅ Script completed successfully!"
